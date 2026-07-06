@@ -1,0 +1,5 @@
+anthropic>=0.40.0
+
+# For the optional --pdf export (pure Python, no system dependencies)
+markdown>=3.5
+xhtml2pdf>=0.2.11

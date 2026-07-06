@@ -1,0 +1,16 @@
+[CANDIDATE TEMPLATE — replace everything below with a real background, then save as a new file, e.g. my_candidate.txt]
+
+Paste the candidate's résumé or LinkedIn background here. Useful things to include:
+
+- Name (or leave anonymous, e.g. "Candidate A")
+- Work experience: company, title, dates, and a few bullet points of what
+  they did (numbers/impact help a lot)
+- Education
+- Location
+- Anything else relevant: languages, certifications, notable projects
+
+Privacy note: only use your own résumé, a public profile, or someone who has
+given you permission. Don't feed in a stranger's private information.
+
+Tip: copy-paste directly from a résumé or LinkedIn "About/Experience" section.
+No special formatting needed.
