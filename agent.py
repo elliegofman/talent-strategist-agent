@@ -71,47 +71,160 @@ def save_report_pdf(content, role_name):
     """
     Save the scorecard as a nicely formatted PDF in reports/.
 
-    Uses pure-Python libraries (markdown + xhtml2pdf), so there's nothing
-    to install at the system level. We render the markdown to HTML, wrap it
-    in a little CSS for a clean look, then convert that HTML to a PDF.
+    Built directly with ReportLab (pure-Python, no system dependencies). We
+    parse our own markdown into ReportLab "flowables" — headings, paragraphs,
+    bullet lists, and real Tables with explicit column widths. ReportLab's table
+    engine draws proper side-by-side columns and wraps text inside each cell, so
+    columns never overlap (the failure mode of HTML-to-PDF converters here).
     """
-    # Imported here so the tool still works without these libs if you
-    # only ever want markdown output.
-    import markdown
-    from xhtml2pdf import pisa
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     filename = f"{_report_basename(role_name)}.pdf"
 
-    # The scorecard uses ✅/⚠️/❌ emojis, which the PDF font can't render
-    # (they show up as ■ boxes). The words "Strong/Partial/Gap" already sit
-    # next to them, so we just drop the emoji for a clean PDF. The markdown
-    # file keeps its emojis untouched.
-    pdf_content = content
-    for emoji in ("✅", "⚠️", "⚠", "❌"):
-        pdf_content = pdf_content.replace(emoji, "")
+    margin = 1.5 * cm
+    content_width = letter[0] - 2 * margin  # usable width for tables
 
-    body_html = markdown.markdown(pdf_content, extensions=["tables"])
-    styled_html = f"""
-    <html><head><style>
-        @page {{ size: letter; margin: 2cm; }}
-        body {{ font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a1a; line-height: 1.5; }}
-        h1 {{ font-size: 20pt; color: #111; border-bottom: 2px solid #333; padding-bottom: 6px; }}
-        h2 {{ font-size: 13pt; color: #222; margin-top: 18px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
-        th, td {{ border: 1px solid #bbb; padding: 6px 8px; text-align: left; vertical-align: top; }}
-        th {{ background-color: #f0f0f0; font-weight: bold; }}
-        strong {{ color: #000; }}
-        hr {{ border: none; border-top: 1px solid #ddd; margin: 16px 0; }}
-    </style></head><body>{body_html}</body></html>
-    """
-
-    with open(filename, "wb") as f:
-        result = pisa.CreatePDF(styled_html, dest=f)
-
-    if result.err:
-        raise RuntimeError("PDF generation failed")
+    doc = SimpleDocTemplate(
+        filename, pagesize=letter,
+        leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
+        title="Candidate Scorecard",
+    )
+    flowables = _markdown_to_flowables(content, content_width)
+    doc.build(flowables)
     return filename
+
+
+# Column-width ratios by number of columns (must sum to 1.0). Common report
+# shapes are hand-tuned; anything else is split evenly in the code below.
+_COLUMN_RATIOS = {
+    2: [0.28, 0.72],                              # summary "label | value"
+    3: [0.34, 0.12, 0.54],                        # requirement | match | evidence
+    7: [0.06, 0.22, 0.11, 0.12, 0.16, 0.17, 0.16],  # comparison ranking
+}
+
+
+def _pdf_inline(text):
+    """Prepare a line of markdown text for a ReportLab Paragraph.
+
+    Escapes XML-special characters, converts **bold** to <b>, strips emojis the
+    PDF font can't render, and drops leading markdown bullet/blockquote markers.
+    """
+    for emoji in ("✅", "⚠️", "⚠", "❌", "🥇"):
+        text = text.replace(emoji, "")
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Bold: **x** -> <b>x</b>  (done after escaping so the tags survive)
+    import re
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    return text.strip()
+
+
+def _is_table_row(line):
+    return line.strip().startswith("|") and line.strip().endswith("|")
+
+
+def _is_table_separator(line):
+    # e.g. |---|:--:|---|  — only dashes, colons, pipes, spaces
+    cells = line.strip().strip("|").split("|")
+    return all(set(c.strip()) <= set("-: ") and "-" in c for c in cells)
+
+
+def _split_row(line):
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def _markdown_to_flowables(md, content_width):
+    """Turn our markdown report into an ordered list of ReportLab flowables."""
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, HRFlowable
+
+    base = getSampleStyleSheet()
+    body = ParagraphStyle("body", parent=base["BodyText"], fontSize=10, leading=14, spaceAfter=6)
+    h1 = ParagraphStyle("h1", parent=base["Heading1"], fontSize=18, leading=22, spaceAfter=8)
+    h2 = ParagraphStyle("h2", parent=base["Heading2"], fontSize=13, leading=16,
+                        spaceBefore=12, spaceAfter=4, textColor=colors.HexColor("#222222"))
+    h3 = ParagraphStyle("h3", parent=base["Heading3"], fontSize=11, leading=14, spaceBefore=8, spaceAfter=2)
+    bullet = ParagraphStyle("bullet", parent=body, leftIndent=14, bulletIndent=2, spaceAfter=3)
+    quote = ParagraphStyle("quote", parent=body, leftIndent=14, textColor=colors.HexColor("#555555"),
+                           fontName="Helvetica-Oblique")
+    cell = ParagraphStyle("cell", parent=body, fontSize=8.5, leading=11, spaceAfter=0)
+    cell_head = ParagraphStyle("cellhead", parent=cell, fontName="Helvetica-Bold")
+
+    flow = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if not stripped:
+            i += 1
+            continue
+
+        # Tables: gather consecutive pipe rows.
+        if _is_table_row(line):
+            rows = []
+            while i < len(lines) and _is_table_row(lines[i]):
+                if not _is_table_separator(lines[i]):
+                    rows.append(_split_row(lines[i]))
+                i += 1
+            flow.append(_build_table(rows, content_width, colors, Paragraph, Table, TableStyle,
+                                     cell, cell_head))
+            flow.append(Spacer(1, 8))
+            continue
+
+        # Headings
+        if stripped.startswith("# "):
+            flow.append(Paragraph(_pdf_inline(stripped[2:]), h1))
+            flow.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#333333"),
+                                   spaceBefore=2, spaceAfter=8))
+        elif stripped.startswith("## "):
+            flow.append(Paragraph(_pdf_inline(stripped[3:]), h2))
+        elif stripped.startswith("### "):
+            flow.append(Paragraph(_pdf_inline(stripped[4:]), h3))
+        elif stripped in ("---", "***", "___"):
+            flow.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#dddddd"),
+                                   spaceBefore=6, spaceAfter=6))
+        elif stripped.startswith(("- ", "* ")):
+            flow.append(Paragraph(_pdf_inline(stripped[2:]), bullet, bulletText="•"))
+        elif stripped.startswith("> "):
+            flow.append(Paragraph(_pdf_inline(stripped[2:]), quote))
+        else:
+            flow.append(Paragraph(_pdf_inline(stripped), body))
+        i += 1
+
+    return flow
+
+
+def _build_table(rows, content_width, colors, Paragraph, Table, TableStyle, cell, cell_head):
+    """Build a ReportLab Table with explicit column widths so columns never overlap."""
+    n_cols = max(len(r) for r in rows)
+    # Normalise every row to the same column count.
+    rows = [r + [""] * (n_cols - len(r)) for r in rows]
+
+    ratios = _COLUMN_RATIOS.get(n_cols, [1.0 / n_cols] * n_cols)
+    col_widths = [content_width * r for r in ratios]
+
+    # Wrap each cell's text in a Paragraph so it wraps within its column.
+    data = []
+    for row_idx, row in enumerate(rows):
+        style = cell_head if row_idx == 0 else cell
+        data.append([Paragraph(_pdf_inline(c), style) for c in row])
+
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bbbbbb")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return table
 
 
 # ── Agent Core ─────────────────────────────────────────────────
@@ -312,8 +425,9 @@ def step_4_build_scorecard(client, candidate_text, role_text, candidate_research
 
 Produce a comprehensive evaluation scorecard in clean markdown format. Use this exact structure:
 
-# Candidate Fit Scorecard
+# Candidate Fit Scorecard: [candidate's full name]
 
+**Candidate:** [candidate's full name, taken from their background]
 **Role:** [role title] at [company]
 **Date:** {datetime.now().strftime("%B %d, %Y")}
 
@@ -657,10 +771,30 @@ def get_input_from_files(role_path, candidate_path):
 
 
 def _candidate_name_from_path(path):
-    """Turn a file path into a readable candidate name, e.g. my_candidate.txt -> My Candidate."""
+    """Fallback: turn a file path into a readable name, e.g. jane_doe.txt -> Jane Doe."""
     stem = os.path.splitext(os.path.basename(path))[0]
     stem = stem.replace("my_candidate", "candidate")  # avoid a generic 'My Candidate'
     return stem.replace("_", " ").replace("-", " ").strip().title() or "Candidate"
+
+
+def _candidate_name_from_text(text, fallback):
+    """
+    Pull the candidate's actual name from the top of their résumé.
+
+    Résumés almost always lead with the person's name, often followed by a title
+    after a dash or pipe (e.g. "Jordan Kim — Operations Professional"). We take
+    the first non-empty line and cut it at the first such separator. If the
+    result doesn't look like a name, we use the filename-based fallback.
+    """
+    first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    for sep in ("—", "–", " - ", "|", ",", "\t"):
+        if sep in first_line:
+            first_line = first_line.split(sep)[0].strip()
+            break
+    # A real name is short and isn't a placeholder heading.
+    if 0 < len(first_line) <= 40 and first_line.lower() not in ("name", "candidate"):
+        return first_line
+    return fallback
 
 
 def get_candidates_from_files(candidate_paths):
@@ -669,7 +803,8 @@ def get_candidates_from_files(candidate_paths):
     seen = {}
     for path in candidate_paths:
         text = _read_file(path, "Candidate")
-        name = _candidate_name_from_path(path)
+        # Prefer the real name from the résumé; fall back to the filename.
+        name = _candidate_name_from_text(text, _candidate_name_from_path(path))
         # Disambiguate duplicate display names so the report stays readable.
         if name in seen:
             seen[name] += 1
