@@ -64,6 +64,37 @@ cd talent-strategist-agent
 > candidate records directly. Search quality varies, so I'd add a validation step
 > where the agent checks its own research before synthesizing.
 
+**"How is the code organized?"** (shows engineering judgment)
+> I started as a single working script, then once the behavior was solid I
+> restructured it into a proper package: `cli` (arg parsing), `pipeline`
+> (orchestration), `steps` (the four stages), `prompts` (templates kept separate
+> from logic), `llm` (the Anthropic wrapper with retries), and `pdf` (ReportLab
+> rendering). There's a pytest suite and GitHub Actions CI running on 3 Python
+> versions. Prototype first, harden second — I invested in structure once it was
+> worth it, not before.
+
+---
+
+## Architecture at a glance (for the "walk me through the code" moment)
+
+```
+talent_strategist/
+├── cli.py        → parses arguments, dispatches to a pipeline
+├── pipeline.py   → orchestrates single-candidate and comparison runs
+├── steps.py      → the 4 stages: research candidate, research role,
+│                    extract requirements, build scorecard (+ scoring)
+├── prompts.py    → all prompt text, separate from logic
+├── llm.py        → Anthropic client wrapper: retries + web search
+├── pdf.py        → ReportLab PDF rendering (real tables, no overlap)
+├── storage.py    → saves markdown + optional PDF
+└── candidates.py → reads inputs, pulls each candidate's real name
+```
+Plus: `pyproject.toml` (installable `talent-strategist` command), `tests/`
+(pytest), `.github/workflows/ci.yml` (CI), `LICENSE`, `Makefile`.
+
+**One-liner:** "It's a package, not a script — with tests, CI, and a real
+CLI entry point."
+
 ---
 
 ## The layered-agent framing (strong for talent/ops roles)
