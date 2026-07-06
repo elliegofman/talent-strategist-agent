@@ -8,3 +8,8 @@ __pycache__/
 
 # macOS clutter
 .DS_Store
+
+# Personal inputs & reports — kept local, not published
+examples/my_*.txt
+reports/20260701_171254_Talent_Strategist.md
+reports/20260701_171255_Talent_Strategist.pdf
