@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talent-strategist-agent"
+version = "1.0.0"
+description = "Autonomous candidate-role fit analysis agent built on the Claude API."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ellie Gofman" }]
+keywords = ["claude", "anthropic", "ai-agents", "recruiting", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "anthropic>=0.40.0",
+    "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+talent-strategist = "talent_strategist.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/elliegofman/talent-strategist-agent"
+Repository = "https://github.com/elliegofman/talent-strategist-agent"
+
+[tool.setuptools]
+packages = ["talent_strategist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
